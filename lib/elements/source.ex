@@ -11,7 +11,14 @@ defmodule Basic.Elements.Source do
   # The macro, def_output_pad, lets us define the output pad.
   # The second argument of the macro describes the :caps -
   # which is the type of data sent through the pad.
-  # We have alsoe specified that the :output pad will work in the :pull mode.
+  #
+  #  pads - input or output of an elements or a bin.
+  #         output pads of one element are connected to
+  #         input pads of another element or bin.
+  #
+  #  caps - capabilities, they define pads specification.
+  #
+  # We have also specified that the :output pad will work in the :pull mode.
   def_output_pad :output, [caps: {Packet, type: :custom_packets}, mode: :pull]
 
   # All we need to do here is to initialize the state.
@@ -54,6 +61,33 @@ defmodule Basic.Elements.Source do
   def handle_prepared_to_stopped(_ctx, state) do
     state = %{state | content: nil}
     {:ok, state}
+  end
+
+  # the :output pad is working in the pulling mode, hence succeeding
+  # element have to ask the Source element for the data to be sent
+  # and our element has to take care of keeping that data in some
+  # kind of buffer until it is requested.
+  # When the succeeding element requests data, the handle_demand/4
+  # callback will be invoked.
+  @impl true
+  def handle_demand(:output, _size, :buffers, _ctx, state) do
+    if state.content == [] do
+      { {:ok, end_of_stream: :output}, state}
+    else
+      [first_packet | rest] = state.content
+      state = %{state | content: rest}
+
+      # we make use of the buffer: action, and specify that we want
+      # to transmit the %Buffer structure through the :output pad.
+      action = [buffer: {:output, %Buffer{payload: first_packet} }]
+
+      # the :redemand action, take place on the :output pad.
+      # This action will simply invoke the handle_demand/4 callback
+      # once again, if the whole demand cannot be completely fulfilled
+      # with the single handle_demand invocation we are just processing.
+      action = action ++ [redemand: :output]
+      { {:ok, action}, state}
+    end
   end
 
 end
